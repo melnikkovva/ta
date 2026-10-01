@@ -1,0 +1,3 @@
+/home/maria-melnikova/Desktop/ta/lab1/build/CMakeFiles/AutomatonConverter.dir
+/home/maria-melnikova/Desktop/ta/lab1/build/CMakeFiles/edit_cache.dir
+/home/maria-melnikova/Desktop/ta/lab1/build/CMakeFiles/rebuild_cache.dir

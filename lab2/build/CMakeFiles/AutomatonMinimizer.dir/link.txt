@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/AutomatonMinimizer.dir/main.cpp.o -o AutomatonMinimizer 
