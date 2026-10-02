@@ -7,6 +7,7 @@
 #include <set>
 #include <variant>
 #include <algorithm>
+#include <queue>
 
 struct MealyTransition 
 {
@@ -51,10 +52,7 @@ using MealyTransitionTable = std::map<std::string, std::map<std::string, std::pa
 std::string Trim(const std::string& str) 
 {
     size_t first = str.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) 
-    {
-        return "";
-    }
+    if (first == std::string::npos) return "";
     size_t last = str.find_last_not_of(" \t\r\n");
     return str.substr(first, (last - first + 1));
 }
@@ -72,27 +70,22 @@ Automaton ParseAutomaton(std::istream& input)
     while (std::getline(input, line)) 
     {
         line = Trim(line);
-        if (line.empty()) 
-        {
-            continue;
-        }
+        if (line.empty()) continue;
 
         if (line.rfind("type:", 0) == 0) 
         {
             type = Trim(line.substr(5));
+            if (type != "mealy" && type != "moore")
+            {
+                throw std::invalid_argument("Неизвестный тип автомата: " + type);
+            }
             continue;
         }
         if (line.rfind("start:", 0) == 0) 
         {
             startState = Trim(line.substr(6));
-            if (type == "mealy") 
-            {
-                mealy.startState = startState;
-            }
-            else if (type == "moore") 
-            {
-                moore.startState = startState;
-            }
+            mealy.startState = startState;
+            moore.startState = startState;
             continue;
         }
 
@@ -108,15 +101,12 @@ Automaton ParseAutomaton(std::istream& input)
         }
 
         std::stringstream ss(line);
-        if (type == "mealy") 
+        if (type == "mealy" && currentSection == "transitions") 
         {
-            if (currentSection == "transitions") 
+            std::string from, to, inSymbol, slash, outSymbol;
+            if (ss >> from >> to >> inSymbol >> slash >> outSymbol && slash == "/") 
             {
-                std::string from, to, inSymbol, slash, outSymbol;
-                if (ss >> from >> to >> inSymbol >> slash >> outSymbol && slash == "/") 
-                {
-                    mealy.transitions.push_back({from, to, inSymbol, outSymbol});
-                }
+                mealy.transitions.push_back({from, to, inSymbol, outSymbol});
             }
         } 
         else if (type == "moore") 
@@ -140,30 +130,60 @@ Automaton ParseAutomaton(std::istream& input)
         }
     }
 
-    if (type == "mealy") 
-    {
-        return mealy;
-    }
+    if (type == "mealy") return mealy;
     return moore;
 }
 
-MooreTransitionTable BuildTransitionTableForMoore(const MooreMachine& moore, std::set<std::string>& inputAlphabet, std::vector<std::string>& statesList) 
+
+MooreTransitionTable BuildTransitionTableForMoore(
+    const MooreMachine& moore, 
+    std::set<std::string>& inputAlphabet, 
+    std::vector<std::string>& statesList) 
 {
-    std::set<std::string> allStates;
-    for (const auto& [alias, _] : moore.states) 
-    {
-        allStates.insert(alias);
-    }
+    std::set<std::string> reachableStates;
+    std::queue<std::string> q;
     
-    MooreTransitionTable table;
+    if (!moore.startState.empty()) 
+    {
+        q.push(moore.startState);
+        reachableStates.insert(moore.startState);
+    }
+
+    MooreTransitionTable rawTable;
     for (const auto& transition : moore.transitions) 
     {
         inputAlphabet.insert(transition.input);
-        allStates.insert(transition.fromState);
-        allStates.insert(transition.toState);
-        table[transition.fromState][transition.input] = transition.toState;
+        rawTable[transition.fromState][transition.input] = transition.toState;
     }
-    statesList.assign(allStates.begin(), allStates.end());
+
+    while (!q.empty()) 
+    {
+        std::string curr = q.front();
+        q.pop();
+
+        if (rawTable.count(curr)) 
+        {
+            for (const auto& [inp, target] : rawTable[curr]) 
+            {
+                if (!reachableStates.count(target)) 
+                {
+                    reachableStates.insert(target);
+                    q.push(target);
+                }
+            }
+        }
+    }
+
+    MooreTransitionTable table;
+    for (const auto& transition : moore.transitions) 
+    {
+        if (reachableStates.count(transition.fromState) && reachableStates.count(transition.toState)) 
+        {
+            table[transition.fromState][transition.input] = transition.toState;
+        }
+    }
+
+    statesList.assign(reachableStates.begin(), reachableStates.end());
     return table;
 }
 
@@ -187,9 +207,19 @@ std::map<std::string, int> BuildInitialClassesForMoore(const MooreMachine& moore
     return stateToClassId;
 }
 
-std::map<std::string, int> RefineClassesForMoore(const std::vector<std::string>& statesList, const std::set<std::string>& inputAlphabet, const MooreTransitionTable& table, std::map<std::string, int> stateToClassId) 
+std::map<std::string, int> RefineClassesForMoore(
+    const std::vector<std::string>& statesList, 
+    const std::set<std::string>& inputAlphabet, 
+    const MooreTransitionTable& table, 
+    std::map<std::string, int> stateToClassId) 
 {
     bool splitOccurred = true;
+    int currentClassCount = 0;
+    for (const auto& [_, cid] : stateToClassId) 
+    {
+        currentClassCount = std::max(currentClassCount, cid + 1);
+    }
+
     while (splitOccurred) 
     {
         splitOccurred = false;
@@ -203,8 +233,15 @@ std::map<std::string, int> RefineClassesForMoore(const std::vector<std::string>&
             for (const auto& inputSymbol : inputAlphabet) 
             {
                 auto it = table.find(stateName);
-                std::string targetState = (it != table.end() && it->second.count(inputSymbol)) ? it->second.at(inputSymbol) : "";
-                targetClassIds.push_back(stateToClassId[targetState]);
+                if (it != table.end() && it->second.count(inputSymbol)) 
+                {
+                    std::string targetState = it->second.at(inputSymbol);
+                    targetClassIds.push_back(stateToClassId.at(targetState));
+                } 
+                else 
+                {
+                    targetClassIds.push_back(-1);
+                }
             }
 
             auto signature = std::make_pair(stateToClassId[stateName], targetClassIds);
@@ -215,16 +252,22 @@ std::map<std::string, int> RefineClassesForMoore(const std::vector<std::string>&
             nextStateToClassId[stateName] = signatureToClassId[signature];
         }
 
-        if (nextClassCount > signatureToClassId.size()) 
+        if (nextClassCount > currentClassCount) 
         {
             splitOccurred = true;
+            currentClassCount = nextClassCount;
             stateToClassId = nextStateToClassId;
         }
     }
     return stateToClassId;
 }
 
-MooreMachine ConstructMooreMachine(const MooreMachine& original, const std::vector<std::string>& statesList, const std::set<std::string>& inputAlphabet, const MooreTransitionTable& table, const std::map<std::string, int>& stateToClassId) 
+MooreMachine ConstructMooreMachine(
+    const MooreMachine& original, 
+    const std::vector<std::string>& statesList, 
+    const std::set<std::string>& inputAlphabet, 
+    const MooreTransitionTable& table, 
+    const std::map<std::string, int>& stateToClassId) 
 {
     MooreMachine minMoore;
     std::map<int, std::string> classIdToNewAlias;
@@ -235,12 +278,15 @@ MooreMachine ConstructMooreMachine(const MooreMachine& original, const std::vect
         int equivalenceClassId = stateToClassId.at(stateName);
         if (classIdToNewAlias.find(equivalenceClassId) == classIdToNewAlias.end()) 
         {
-            classIdToNewAlias[equivalenceClassId] = std::to_string(equivalenceClassId);
+            classIdToNewAlias[equivalenceClassId] = "Q" + std::to_string(equivalenceClassId);
             classIdToRepresentative[equivalenceClassId] = stateName;
         }
     }
 
-    minMoore.startState = classIdToNewAlias[stateToClassId.at(original.startState)];
+    if (stateToClassId.count(original.startState)) 
+    {
+        minMoore.startState = classIdToNewAlias[stateToClassId.at(original.startState)];
+    }
 
     for (const auto& [equivalenceClassId, newAlias] : classIdToNewAlias) 
     {
@@ -256,7 +302,7 @@ MooreMachine ConstructMooreMachine(const MooreMachine& original, const std::vect
             if (tableIt != table.end() && tableIt->second.count(inputSymbol)) 
             {
                 std::string targetState = tableIt->second.at(inputSymbol);
-                if (!targetState.empty()) 
+                if (!targetState.empty() && stateToClassId.count(targetState)) 
                 {
                     minMoore.transitions.push_back({newAlias, classIdToNewAlias[stateToClassId.at(targetState)], inputSymbol});
                 }
@@ -278,23 +324,63 @@ MooreMachine MinimizeMoore(const MooreMachine& moore)
     return ConstructMooreMachine(moore, statesList, inputAlphabet, transitionTable, refinedClasses);
 }
 
-MealyTransitionTable BuildTransitionTableForMealy(const MealyMachine& mealy, std::set<std::string>& inputAlphabet, std::vector<std::string>& statesList) 
-{
-    std::set<std::string> allStates;
-    MealyTransitionTable table;
 
+MealyTransitionTable BuildTransitionTableForMealy(
+    const MealyMachine& mealy, 
+    std::set<std::string>& inputAlphabet, 
+    std::vector<std::string>& statesList) 
+{
+    std::set<std::string> reachableStates;
+    std::queue<std::string> q;
+
+    if (!mealy.startState.empty()) 
+    {
+        q.push(mealy.startState);
+        reachableStates.insert(mealy.startState);
+    }
+
+    MealyTransitionTable rawTable;
     for (const auto& transition : mealy.transitions) 
     {
         inputAlphabet.insert(transition.input);
-        allStates.insert(transition.fromState);
-        allStates.insert(transition.toState);
-        table[transition.fromState][transition.input] = {transition.toState, transition.output};
+        rawTable[transition.fromState][transition.input] = {transition.toState, transition.output};
     }
-    statesList.assign(allStates.begin(), allStates.end());
+
+    while (!q.empty()) 
+    {
+        std::string curr = q.front();
+        q.pop();
+
+        if (rawTable.count(curr)) 
+        {
+            for (const auto& [inp, targetPair] : rawTable[curr]) 
+            {
+                if (!reachableStates.count(targetPair.first)) 
+                {
+                    reachableStates.insert(targetPair.first);
+                    q.push(targetPair.first);
+                }
+            }
+        }
+    }
+
+    MealyTransitionTable table;
+    for (const auto& transition : mealy.transitions) 
+    {
+        if (reachableStates.count(transition.fromState) && reachableStates.count(transition.toState)) 
+        {
+            table[transition.fromState][transition.input] = {transition.toState, transition.output};
+        }
+    }
+
+    statesList.assign(reachableStates.begin(), reachableStates.end());
     return table;
 }
 
-std::map<std::string, int> BuildInitialClassesForMealy(const std::vector<std::string>& statesList, const std::set<std::string>& inputAlphabet, const MealyTransitionTable& table) 
+std::map<std::string, int> BuildInitialClassesForMealy(
+    const std::vector<std::string>& statesList, 
+    const std::set<std::string>& inputAlphabet, 
+    const MealyTransitionTable& table) 
 {
     std::map<std::string, int> stateToClassId;
     std::map<std::vector<std::string>, int> outputsSignatureToClassId;
@@ -306,7 +392,7 @@ std::map<std::string, int> BuildInitialClassesForMealy(const std::vector<std::st
         for (const auto& inputSymbol : inputAlphabet) 
         {
             auto it = table.find(stateName);
-            std::string outputSymbol = (it != table.end() && it->second.count(inputSymbol)) ? it->second.at(inputSymbol).second : "";
+            std::string outputSymbol = (it != table.end() && it->second.count(inputSymbol)) ? it->second.at(inputSymbol).second : "-";
             outputsSignature.push_back(outputSymbol);
         }
 
@@ -319,9 +405,19 @@ std::map<std::string, int> BuildInitialClassesForMealy(const std::vector<std::st
     return stateToClassId;
 }
 
-std::map<std::string, int> RefineClassesForMealy(const std::vector<std::string>& statesList, const std::set<std::string>& inputAlphabet, const MealyTransitionTable& table, std::map<std::string, int> stateToClassId) 
+std::map<std::string, int> RefineClassesForMealy(
+    const std::vector<std::string>& statesList, 
+    const std::set<std::string>& inputAlphabet, 
+    const MealyTransitionTable& table, 
+    std::map<std::string, int> stateToClassId) 
 {
     bool splitOccurred = true;
+    int currentClassCount = 0;
+    for (const auto& [_, cid] : stateToClassId) 
+    {
+        currentClassCount = std::max(currentClassCount, cid + 1);
+    }
+
     while (splitOccurred) 
     {
         splitOccurred = false;
@@ -335,8 +431,15 @@ std::map<std::string, int> RefineClassesForMealy(const std::vector<std::string>&
             for (const auto& inputSymbol : inputAlphabet) 
             {
                 auto it = table.find(stateName);
-                std::string targetState = (it != table.end() && it->second.count(inputSymbol)) ? it->second.at(inputSymbol).first : "";
-                targetClassIds.push_back(stateToClassId[targetState]);
+                if (it != table.end() && it->second.count(inputSymbol)) 
+                {
+                    std::string targetState = it->second.at(inputSymbol).first;
+                    targetClassIds.push_back(stateToClassId.at(targetState));
+                } 
+                else 
+                {
+                    targetClassIds.push_back(-1);
+                }
             }
 
             auto signature = std::make_pair(stateToClassId[stateName], targetClassIds);
@@ -347,16 +450,22 @@ std::map<std::string, int> RefineClassesForMealy(const std::vector<std::string>&
             nextStateToClassId[stateName] = signatureToClassId[signature];
         }
 
-        if (nextClassCount > signatureToClassId.size()) 
+        if (nextClassCount > currentClassCount) 
         {
             splitOccurred = true;
+            currentClassCount = nextClassCount;
             stateToClassId = nextStateToClassId;
         }
     }
     return stateToClassId;
 }
 
-MealyMachine ConstructMealyMachine(const MealyMachine& original, const std::vector<std::string>& statesList, const std::set<std::string>& inputAlphabet, const MealyTransitionTable& table, const std::map<std::string, int>& stateToClassId) 
+MealyMachine ConstructMealyMachine(
+    const MealyMachine& original, 
+    const std::vector<std::string>& statesList, 
+    const std::set<std::string>& inputAlphabet, 
+    const MealyTransitionTable& table, 
+    const std::map<std::string, int>& stateToClassId) 
 {
     MealyMachine minMealy;
     std::map<int, std::string> classIdToNewAlias;
@@ -367,12 +476,15 @@ MealyMachine ConstructMealyMachine(const MealyMachine& original, const std::vect
         int equivalenceClassId = stateToClassId.at(stateName);
         if (classIdToNewAlias.find(equivalenceClassId) == classIdToNewAlias.end()) 
         {
-            classIdToNewAlias[equivalenceClassId] = std::to_string(equivalenceClassId);
+            classIdToNewAlias[equivalenceClassId] = "S" + std::to_string(equivalenceClassId);
             classIdToRepresentative[equivalenceClassId] = stateName;
         }
     }
 
-    minMealy.startState = classIdToNewAlias[stateToClassId.at(original.startState)];
+    if (stateToClassId.count(original.startState)) 
+    {
+        minMealy.startState = classIdToNewAlias[stateToClassId.at(original.startState)];
+    }
 
     for (const auto& [equivalenceClassId, newAlias] : classIdToNewAlias) 
     {
@@ -383,9 +495,14 @@ MealyMachine ConstructMealyMachine(const MealyMachine& original, const std::vect
             if (tableIt != table.end() && tableIt->second.count(inputSymbol)) 
             {
                 auto [targetState, outputSymbol] = tableIt->second.at(inputSymbol);
-                if (!targetState.empty()) 
+                if (!targetState.empty() && stateToClassId.count(targetState)) 
                 {
-                    minMealy.transitions.push_back({newAlias, classIdToNewAlias[stateToClassId.at(targetState)], inputSymbol, outputSymbol});
+                    minMealy.transitions.push_back({
+                        newAlias, 
+                        classIdToNewAlias[stateToClassId.at(targetState)], 
+                        inputSymbol, 
+                        outputSymbol
+                    });
                 }
             }
         }
@@ -405,20 +522,18 @@ MealyMachine MinimizeMealy(const MealyMachine& mealy)
     return ConstructMealyMachine(mealy, statesList, inputAlphabet, transitionTable, refinedClasses);
 }
 
-Automaton Minimize(const MealyMachine& mealy) 
-{
-    return MinimizeMealy(mealy);
-}
-
-Automaton Minimize(const MooreMachine& moore) 
-{
-    return MinimizeMoore(moore);
-}
-
 Automaton MinimizeAutomaton(const Automaton& automaton) 
 {
     return std::visit([](const auto& machine) -> Automaton {
-        return Minimize(machine);
+        using T = std::decay_t<decltype(machine)>;
+        if constexpr (std::is_same_v<T, MealyMachine>) 
+        {
+            return MinimizeMealy(machine);
+        } 
+        else 
+        {
+            return MinimizeMoore(machine);
+        }
     }, automaton);
 }
 
@@ -433,7 +548,8 @@ struct AutomatonWriter
         outputStream << "transitions:\n";
         for (const auto& transition : machine.transitions) 
         {
-            outputStream << transition.fromState << " " << transition.toState << " " << transition.input << " / " << transition.output << "\n";
+            outputStream << transition.fromState << " " << transition.toState << " " 
+                         << transition.input << " / " << transition.output << "\n";
         }
     }
 
@@ -449,7 +565,8 @@ struct AutomatonWriter
         outputStream << "\ntransitions:\n";
         for (const auto& transition : machine.transitions) 
         {
-            outputStream << transition.fromState << " " << transition.toState << " " << transition.input << "\n";
+            outputStream << transition.fromState << " " << transition.toState << " " 
+                         << transition.input << "\n";
         }
     }
 };
@@ -458,7 +575,7 @@ int main()
 {
     std::string inputFilePath;
     std::cout << "Введите путь к файлу для чтения: ";
-    std::cin >> inputFilePath;
+    if (!(std::cin >> inputFilePath)) return 0;
 
     std::ifstream inputFile(inputFilePath);
     if (!inputFile.is_open()) 
@@ -466,23 +583,33 @@ int main()
         std::cerr << "Ошибка: Не удалось открыть файл \"" << inputFilePath << "\"\n";
     }
 
-    Automaton originalAutomaton = ParseAutomaton(inputFile);
-    inputFile.close();
-
-    Automaton minimizedAutomaton = MinimizeAutomaton(originalAutomaton);
-
-    std::string outputFilePath;
-    std::cout << "Введите имя файла для записи результата минимизации: ";
-    std::cin >> outputFilePath;
-
-    std::ofstream outputFile(outputFilePath);
-    if (!outputFile.is_open()) 
+    try 
     {
-        std::cerr << "Ошибка: Не удалось открыть файл для записи \"" << outputFilePath << "\"\n";
+        Automaton originalAutomaton = ParseAutomaton(inputFile);
+        inputFile.close();
+
+        Automaton minimizedAutomaton = MinimizeAutomaton(originalAutomaton);
+
+        std::string outputFilePath;
+        std::cout << "Введите имя файла для записи результата минимизации: ";
+        std::cin >> outputFilePath;
+
+        std::ofstream outputFile(outputFilePath);
+        if (!outputFile.is_open()) 
+        {
+            std::cerr << "Ошибка: Не удалось открыть файл для записи \"" << outputFilePath << "\"\n";
+            return 1;
+        }
+
+        std::visit(AutomatonWriter{outputFile}, minimizedAutomaton);
+        outputFile.close();
+
+        std::cout << "Автомат успешно сохранен в файл \"" << outputFilePath << "\".\n";
+    }
+    catch (const std::exception& e) 
+    {
+        std::cerr << "Произошла ошибка: " << e.what() << "\n";
     }
 
-    std::visit(AutomatonWriter{outputFile}, minimizedAutomaton);
-    outputFile.close();
-
-    std::cout << "Автомат успешно сохранен в файл \"" << outputFilePath << "\".\n";
+    return 0;
 }

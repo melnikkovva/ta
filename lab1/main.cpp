@@ -140,48 +140,37 @@ Automaton ParseAutomaton(std::istream& input)
     {
         return mealy;
     }
-    else
-    {
-        return moore;
-    }
+    return moore;
 }
 
 MooreMachine ConvertMealyToMoore(const MealyMachine& mealy) 
 {
     MooreMachine moore;
 
-    for (const auto& mealyTransition : mealy.transitions) 
+    for (const auto& t : mealy.transitions) 
     {
-        std::string targetMooreState = mealyTransition.toState + "_" + mealyTransition.output;
+        std::string targetAlias = t.toState + "_" + t.output;
         
-        if (moore.states.find(targetMooreState) == moore.states.end()) 
+        if (moore.states.find(targetAlias) == moore.states.end()) 
         {
-            moore.states[targetMooreState] = {targetMooreState, targetMooreState, mealyTransition.output};
-        }
-
-        if (moore.startState.empty() && mealyTransition.fromState == mealy.startState) 
-        {
-            moore.startState = targetMooreState;
+            moore.states[targetAlias] = {targetAlias, targetAlias, t.output};
         }
     }
 
-    for (const auto& mealyTransition : mealy.transitions) 
+    for (const auto& [sourceAlias, sourceState] : moore.states) 
     {
-        std::string targetMooreState = mealyTransition.toState + "_" + mealyTransition.output;
-        std::string sourceStatePrefix = mealyTransition.fromState + "_";
+        std::string origFrom = sourceAlias.substr(0, sourceAlias.find('_'));
 
-        for (const auto& [mooreStateName, _] : moore.states) 
+        for (const auto& t : mealy.transitions) 
         {
-            if (mooreStateName.rfind(sourceStatePrefix, 0) == 0)
-            { 
-                moore.transitions.push_back({
-                    mooreStateName,      
-                    targetMooreState,
-                    mealyTransition.input 
-                });
+            if (t.fromState == origFrom) 
+            {
+                std::string targetAlias = t.toState + "_" + t.output;
+                moore.transitions.push_back({sourceAlias, targetAlias, t.input});
             }
         }
     }
+
     return moore;
 }
 
@@ -205,22 +194,18 @@ MealyMachine ConvertMooreToMealy(const MooreMachine& moore)
     return mealy;
 }
 
-Automaton ConvertAutomaton(const Automaton& automaton) 
+struct AutomatonConverter 
 {
-    return std::visit([](const auto& machine) -> Automaton {
-        return Convert(machine);
-    }, automaton);
-}
+    Automaton operator()(const MealyMachine& mealy) const 
+    {
+        return ConvertMealyToMoore(mealy);
+    }
 
-Automaton Convert(const MealyMachine& mealy) 
-{
-    return ConvertMealyToMoore(mealy); 
-}
-
-Automaton Convert(const MooreMachine& moore) 
-{
-    return ConvertMooreToMealy(moore);
-}
+    Automaton operator()(const MooreMachine& moore) const 
+    {
+        return ConvertMooreToMealy(moore);
+    }
+};
 
 struct AutomatonWriter 
 {
@@ -233,7 +218,8 @@ struct AutomatonWriter
         outputStream << "transitions:\n";
         for (const auto& t : machine.transitions) 
         {
-            outputStream << t.fromState << " " << t.toState << " "  << t.input << " / " << t.output << "\n";
+            outputStream << t.fromState << " " << t.toState << " " 
+                         << t.input << " / " << t.output << "\n";
         }
     }
 
@@ -267,7 +253,7 @@ int main()
     }
 
     Automaton originalAutomaton = ParseAutomaton(inputFile);
-    Automaton convertedAutomaton = ConvertAutomaton(originalAutomaton);
+    Automaton convertedAutomaton = std::visit(AutomatonConverter{}, originalAutomaton);
 
     std::string outputFilePath;
     std::cout << "Введите имя файла для записи результата: ";
