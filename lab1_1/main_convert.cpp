@@ -1,5 +1,3 @@
-// Преобразование автомата Мили в автомат Мура и обратно.
-
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -10,27 +8,19 @@
 
 #include "Utils.h"
 
-// Пара (состояние Мили, выход перехода, которым в него пришли) = одно состояние Мура.
 using StateAndOutput = std::pair<std::string, std::string>;
 
-// Выход начального состояния Мура. Он не соответствует ни одному выходу Мили
-// и на эквивалентность автоматов не влияет.
 const std::string START_OUTPUT = "-";
 
 MooreMachine ConvertMealyToMoore(const MealyMachine& mealy)
 {
     MooreMachine moore;
 
-    // Шаг 1. Собираем все пары (в какое состояние ведёт переход, какой у него выход).
     std::set<StateAndOutput> pairs;
     for (const MealyTransition& transition : mealy.transitions)
     {
         pairs.insert({transition.toState, transition.output});
     }
-
-    // Начальное состояние Мура. Если в начальное состояние Мили ведут переходы,
-    // берём одну из уже существующих пар (A, x): поведение у них одинаковое,
-    // а лишнего состояния не появится. Если переходов в него нет, создаём пару с выходом "-".
     StateAndOutput startPair = {mealy.startState, START_OUTPUT};
     for (const StateAndOutput& pair : pairs)
     {
@@ -42,7 +32,6 @@ MooreMachine ConvertMealyToMoore(const MealyMachine& mealy)
     }
     pairs.insert(startPair);
 
-    // Шаг 2. Каждой паре даём имя q0, q1, q2... и создаём состояние Мура.
     std::map<StateAndOutput, std::string> nameOfPair;
     int number = 0;
     for (const StateAndOutput& pair : pairs)
@@ -55,7 +44,6 @@ MooreMachine ConvertMealyToMoore(const MealyMachine& mealy)
     }
     moore.startState = nameOfPair[startPair];
 
-    // Шаг 3. Переходы. Состояние Мура (A, x) ведёт туда же, куда и исходное состояние A.
     for (const StateAndOutput& pair : pairs)
     {
         std::string fromName = nameOfPair[pair];
@@ -80,7 +68,6 @@ MealyMachine ConvertMooreToMealy(const MooreMachine& moore)
     MealyMachine mealy;
     mealy.startState = moore.startState;
 
-    // Выход перехода = выход состояния, в которое переход ведёт.
     for (const MooreTransition& transition : moore.transitions)
     {
         std::string output = moore.states.at(transition.toState).output;
