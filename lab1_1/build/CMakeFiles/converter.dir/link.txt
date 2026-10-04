@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/converter.dir/main_convert.cpp.o -o converter  libautomata_common.a 

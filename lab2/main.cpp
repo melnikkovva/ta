@@ -45,7 +45,6 @@ struct MooreMachine
 };
 
 using Automaton = std::variant<MealyMachine, MooreMachine>;
-
 using MooreTransitionTable = std::map<std::string, std::map<std::string, std::string>>;
 using MealyTransitionTable = std::map<std::string, std::map<std::string, std::pair<std::string, std::string>>>;
 

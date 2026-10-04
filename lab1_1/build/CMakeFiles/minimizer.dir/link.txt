@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/minimizer.dir/main_minimize.cpp.o -o minimizer  libautomata_common.a 

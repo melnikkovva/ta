@@ -1,0 +1,5 @@
+/home/maria-melnikova/Desktop/ta/lab1_1/build/CMakeFiles/automata_common.dir
+/home/maria-melnikova/Desktop/ta/lab1_1/build/CMakeFiles/converter.dir
+/home/maria-melnikova/Desktop/ta/lab1_1/build/CMakeFiles/minimizer.dir
+/home/maria-melnikova/Desktop/ta/lab1_1/build/CMakeFiles/edit_cache.dir
+/home/maria-melnikova/Desktop/ta/lab1_1/build/CMakeFiles/rebuild_cache.dir
