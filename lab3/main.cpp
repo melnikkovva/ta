@@ -65,7 +65,7 @@ MooreMachine ConvertDFA(MooreMachine nfa)
         }
     }
 
-    newAutomaton.states[startAlias] = MooreState{startAlias, "State_" + startAlias, defaultOutput};
+    newAutomaton.states[startAlias] = MooreState{startAlias, startAlias, defaultOutput};
 
     std::set<std::string> inputs;
     for (const auto& t : nfa.transitions) 
@@ -121,7 +121,7 @@ MooreMachine ConvertDFA(MooreMachine nfa)
                     output = it->second.output;
                 }
 
-                newAutomaton.states[nextAlias] = MooreState{nextAlias, "State_" + nextAlias, output};
+                newAutomaton.states[nextAlias] = MooreState{nextAlias, nextAlias, output};
             }
             newAutomaton.transitions.push_back(MooreTransition{currentAlias, nextAlias, input});
         }
