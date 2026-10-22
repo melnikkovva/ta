@@ -1,8 +1,6 @@
 #pragma once
-
 #include <iosfwd>
 #include <string>
-
 #include "Types.h"
 
 std::string Trim(const std::string& str);

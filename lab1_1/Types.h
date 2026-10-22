@@ -40,3 +40,4 @@ struct MooreMachine
 };
 
 using Automaton = std::variant<MealyMachine, MooreMachine>;
+
