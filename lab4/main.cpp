@@ -8,7 +8,7 @@
 #include <vector>
 #include "Types.h"
 
-const std::string EPSILON = "e";
+const std::string EPSILON = "-";
 
 struct TemporaryAutomaton
 {
@@ -133,7 +133,7 @@ TemporaryAutomaton BuildTemporary(const std::string& expr, int& stateCounter)
 {
     TemporaryAutomaton result;
 
-    if (expr.empty() || expr == "ε")
+    if (expr.empty() || expr == "e")
     {
         std::string q0 = CreateState(result, stateCounter);
         std::string q1 = CreateState(result, stateCounter);

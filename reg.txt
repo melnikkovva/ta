@@ -1,0 +1,1 @@
+(ab|c)a*|abb|b*a|c*abb
